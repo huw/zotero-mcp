@@ -11,6 +11,8 @@
 		// Your Zero Trust team domain, and the Application Audience (AUD) tag of the Access application in front of this Worker.
 		"ACCESS_TEAM_DOMAIN": "hyperreal.cloudflareaccess.com",
 		"ACCESS_AUD": "<set in step 4 of the README>",
+		// Your numeric Zotero userID (zotero.org/settings/keys). It is not a secret.
+		"ZOTERO_USER_ID": "13681064",
 		// The AI Search instance the sync fills and semantic_search reads. The Worker creates it on first sync.
 		"AI_SEARCH_INSTANCE": "zotero",
 		// Outside requests one sync run may make. The Workers Free plan allows 50 per invocation; raise this on a paid plan to index faster.
@@ -20,5 +22,5 @@
 	"triggers": { "crons": ["*/10 * * * *"] },
 	"observability": { "enabled": true },
 	"dev": { "port": 8789 },
-	"secrets": { "required": ["ZOTERO_API_KEY", "ZOTERO_USER_ID"] }
+	"secrets": { "required": ["ZOTERO_API_KEY"] }
 }

@@ -53,13 +53,12 @@ pnpm install
 
 ### 1. Make a Zotero API key
 
-At [zotero.org/settings/keys](https://www.zotero.org/settings/keys), create a new key. Allow **library access** and **notes access**, and leave write access off. Note the key, and your numeric **userID** from the same page.
+At [zotero.org/settings/keys](https://www.zotero.org/settings/keys), create a new key. Allow **library access** and **notes access**, and leave write access off. Note the key. Your numeric **userID** is on the same page; put it in `wrangler.jsonc` as `ZOTERO_USER_ID`. It is not a secret.
 
 ### 2. Deploy the Worker
 
 ```sh
 pnpm wrangler secret put ZOTERO_API_KEY
-pnpm wrangler secret put ZOTERO_USER_ID
 pnpm deploy   # also creates the SYNC_STATE KV namespace on the first deploy
 ```
 
