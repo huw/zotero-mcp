@@ -2,10 +2,12 @@ import { fromJsonSchema, McpServer } from "@modelcontextprotocol/server";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/server/validators/cf-worker";
 import { createMcpHandler } from "agents/mcp/server";
 import { isFromAccess } from "./access";
+import { annotationsFor, selectTools, writeModeOf } from "./registry";
 import { aiSearchIndex } from "./search-index";
 import { EMPTY_STATE, runSync, type SyncState } from "./sync";
 import { createTools } from "./tools";
-import { Zotero, ZoteroError } from "./zotero";
+import { createWriteTools } from "./write-tools";
+import { redact, Zotero } from "./zotero";
 
 const validator = new CfWorkerJsonSchemaValidator();
 const STATE_KEY = "state";
@@ -15,8 +17,9 @@ const DEFAULT_SYNC_BUDGET = 45;
 
 function createServer(env: Env) {
 	const server = new McpServer({ name: "zotero-mcp", version: "0.1.0" });
-	const tools = createTools({
-		zotero: new Zotero(),
+	const zotero = new Zotero();
+	const reads = createTools({
+		zotero,
 		search: (query, limit, filters) =>
 			env.AI_SEARCH.get(env.AI_SEARCH_INSTANCE).search({
 				query,
@@ -33,23 +36,21 @@ function createServer(env: Env) {
 		},
 	});
 
+	const tools = selectTools(writeModeOf(env.WRITE_MODE), reads, createWriteTools({ zotero }));
 	for (const tool of tools) {
 		server.registerTool(
 			tool.name,
 			{
 				description: tool.description,
 				inputSchema: fromJsonSchema<Record<string, unknown>>(tool.inputSchema, validator),
-				// Everything here only reads.
-				annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+				annotations: annotationsFor(tool),
 			},
 			async (input) => {
 				try {
 					return await tool.handler(input);
 				} catch (error) {
-					if (error instanceof ZoteroError) {
-						return { isError: true, content: [{ type: "text", text: error.message }] };
-					}
-					throw error;
+					// Zotero refusals and the tools' own checks ("No such item", "not a DOI") are messages meant for Claude.
+					return { isError: true, content: [{ type: "text", text: redact(error instanceof Error ? error.message : String(error)) }] };
 				}
 			},
 		);

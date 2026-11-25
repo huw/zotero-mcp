@@ -12,6 +12,9 @@
 		"ACCESS_AUD": "3e610abe8ec7d5ee22f50467f317b4920c8b4820616209c139ac517ecb32c62f",
 		// Your numeric Zotero userID (zotero.org/settings/keys). It is not a secret.
 		"ZOTERO_USER_ID": "13681064",
+		// What Claude may change in your library. "off": nothing, reads only. "additive": add papers, notes, tags, collections, and nothing is removed or overwritten.
+		// "full": also edit, trash, and reorganise. Each destructive tool can also be blocked per tool in the Claude connector settings.
+		"WRITE_MODE": "full",
 		// The AI Search instance the sync fills and semantic_search reads. The Worker creates it on first sync.
 		"AI_SEARCH_INSTANCE": "zotero",
 		// Outside requests one sync run may make. The Workers Free plan allows 50 per invocation; raise this on a paid plan to index faster.
