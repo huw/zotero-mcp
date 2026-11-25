@@ -12,19 +12,26 @@ export type Deps = {
 	status(): Promise<unknown>;
 };
 
+/** read: only reads. write: adds to the library and removes nothing. destructive: removes, overwrites or moves something that was there. */
+export type ToolKind = "read" | "write" | "destructive";
+
 export type Tool = {
 	name: string;
 	description: string;
+	/** Defaults to "read". Claude shows each tool's setting on the connector, and the kind decides how it is annotated. */
+	kind?: ToolKind;
+	/** True if the tool reaches a site other than Zotero. */
+	openWorld?: boolean;
 	inputSchema: Record<string, unknown>;
 	handler(input: Record<string, any>): Promise<CallToolResult>;
 };
 
-const text = (value: unknown): CallToolResult => ({
+export const text = (value: unknown): CallToolResult => ({
 	content: [{ type: "text", text: redact(typeof value === "string" ? value : JSON.stringify(value)) }],
 });
 
 /** Zotero repeats the library and a set of links on every object. The model never needs them. */
-function slim<T>(value: T): T {
+export function slim<T>(value: T): T {
 	if (Array.isArray(value)) {
 		return value.map(slim) as T;
 	}
@@ -37,7 +44,7 @@ function slim<T>(value: T): T {
 
 const limit = (max: number, fallback: number) => ({ type: "integer", minimum: 1, maximum: max, default: fallback });
 const start = { type: "integer", minimum: 0, default: 0, description: "Offset into the results, for paging." };
-const key = (what: string) => ({ type: "string", pattern: "^[A-Z0-9]{8}$", description: `${what}: an 8-character Zotero key.` });
+export const key = (what: string) => ({ type: "string", pattern: "^[A-Z0-9]{8}$", description: `${what}: an 8-character Zotero key.` });
 
 async function list(zotero: ZoteroLike, path: string, params: Record<string, string | number | undefined>) {
 	const response = await zotero.get(path, { format: "json", ...params });

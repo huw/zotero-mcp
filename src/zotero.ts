@@ -22,6 +22,13 @@ export interface ZoteroLike {
 	hasBudget(count?: number): boolean;
 }
 
+/** The writes the tools make. Kept apart from ZoteroLike so the read-only sync can never reach them. */
+export interface ZoteroWriter extends ZoteroLike {
+	send(method: "POST" | "PATCH" | "DELETE", path: string, body?: unknown, headers?: Record<string, string>): Promise<ZoteroResponse>;
+	/** Zotero's blank item for a type: the fields that type allows. */
+	itemTemplate(itemType: string): Promise<Record<string, unknown>>;
+}
+
 export class ZoteroError extends Error {
 	constructor(
 		message: string,
@@ -46,6 +53,10 @@ function explain(status: number, path: string, detail: string) {
 	switch (status) {
 		case 403:
 			return `Zotero refused the request (HTTP 403) for ${path}. Check that the ZOTERO_API_KEY secret is valid and may read this library. ${detail}`;
+		case 409:
+			return `Zotero refused the change (HTTP 409) for ${path}: something it refers to does not exist, or the library is locked. ${detail}`;
+		case 412:
+			return `Zotero refused the change (HTTP 412) for ${path}: it was edited after it was read. Read it again and retry. ${detail}`;
 		case 404:
 			return `Zotero found nothing at ${path} (HTTP 404). The key may be wrong, or the item may have no content.`;
 		case 429:
@@ -61,7 +72,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * A client for the user library on the Zotero Web API v3. It sends the API key and version headers, honours Zotero's
  * Backoff header, retries a short 429 or 503, and counts requests so a cron invocation can stay inside its subrequest limit.
  */
-export class Zotero implements ZoteroLike {
+export class Zotero implements ZoteroWriter {
 	calls = 0;
 	private backoffUntil = 0;
 
@@ -71,7 +82,30 @@ export class Zotero implements ZoteroLike {
 		return this.calls + count <= this.budget;
 	}
 
-	async get(path: string, params: Params = {}, headers: Record<string, string> = {}): Promise<ZoteroResponse> {
+	get(path: string, params: Params = {}, headers: Record<string, string> = {}) {
+		return this.request("GET", path, params, headers);
+	}
+
+	send(method: "POST" | "PATCH" | "DELETE", path: string, body?: unknown, headers: Record<string, string> = {}) {
+		return this.request(method, path, {}, headers, body);
+	}
+
+	async itemTemplate(itemType: string) {
+		const cached = templates.get(itemType);
+		if (cached) {
+			return cached;
+		}
+		// The template is the same for every user, so it lives outside the user's library path and needs no key.
+		const response = await fetch(`https://api.zotero.org/items/new?itemType=${encodeURIComponent(itemType)}`, { headers: { "Zotero-API-Version": "3" } });
+		if (!response.ok) {
+			throw new ZoteroError(`Zotero has no item type called "${itemType}".`, response.status);
+		}
+		const template = (await response.json()) as Record<string, unknown>;
+		templates.set(itemType, template);
+		return template;
+	}
+
+	private async request(method: string, path: string, params: Params, headers: Record<string, string>, body?: unknown): Promise<ZoteroResponse> {
 		const url = new URL(`https://api.zotero.org/users/${env.ZOTERO_USER_ID}${path}`);
 		for (const [name, value] of Object.entries(params)) {
 			if (value === undefined) {
@@ -93,7 +127,14 @@ export class Zotero implements ZoteroLike {
 			this.calls++;
 
 			const response = await fetch(url, {
-				headers: { "Zotero-API-Key": env.ZOTERO_API_KEY, "Zotero-API-Version": "3", ...headers },
+				method,
+				headers: {
+					"Zotero-API-Key": env.ZOTERO_API_KEY,
+					"Zotero-API-Version": "3",
+					...(body === undefined ? {} : { "Content-Type": "application/json" }),
+					...headers,
+				},
+				body: body === undefined ? undefined : JSON.stringify(body),
 			});
 			const asked = Number(response.headers.get("Backoff"));
 			if (asked > 0) {
@@ -120,13 +161,15 @@ export class Zotero implements ZoteroLike {
 
 			// A 404 is routine: an attachment Zotero has no extracted text for answers 404 on /fulltext.
 			if (response.status !== 404) {
-				console.error("Zotero request failed", { "http.status": response.status, "http.path": url.pathname });
+				console.error("Zotero request failed", { "http.status": response.status, "http.method": method, "http.path": url.pathname });
 			}
 			const detail = redact(await response.text()).slice(0, 500);
 			throw new ZoteroError(explain(response.status, url.pathname, detail), response.status);
 		}
 	}
 }
+
+const templates = new Map<string, Record<string, unknown>>();
 
 export type ZoteroItem = {
 	key: string;
