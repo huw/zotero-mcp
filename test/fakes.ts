@@ -67,11 +67,14 @@ export class FakeZotero implements ZoteroLike {
 export class FakeIndex implements SearchIndex {
 	docs = new Map<string, { text: string; metadata: IndexMetadata }>();
 	ensured = 0;
+	/** How many documents have been sent: each one is ingested, and charged for, by the real index. */
+	upserts = 0;
 
 	async ensure() {
 		this.ensured++;
 	}
 	async upsert(key: string, text: string, metadata: IndexMetadata) {
+		this.upserts++;
 		this.docs.set(key, { text, metadata });
 	}
 	async remove(key: string) {

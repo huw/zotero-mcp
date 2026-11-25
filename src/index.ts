@@ -112,7 +112,7 @@ export default {
 						load: () => env.SYNC_STATE.get<SyncState>(STATE_KEY, "json"),
 						save: (state) => env.SYNC_STATE.put(STATE_KEY, JSON.stringify(state)),
 					});
-					console.log("Zotero sync finished", { indexed: result.indexed, removed: result.removed, waiting: result.state.queue.length, requests: zotero.calls, error: result.error });
+					console.log("Zotero sync finished", { indexed: result.indexed, unchanged: result.unchanged, removed: result.removed, waiting: result.state.queue.length, requests: zotero.calls, error: result.error });
 				} catch (error) {
 					// Reached only if reading or saving the sync state fails, which runSync cannot record itself.
 					console.error("Zotero sync could not run", { error: error instanceof Error ? error.message : String(error) });

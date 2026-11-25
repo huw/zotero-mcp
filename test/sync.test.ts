@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DOCUMENT_FORMAT, type SyncState, runSync } from "../src/sync";
+import { DOCUMENT_FORMAT, EMPTY_STATE, type SyncState, runSync } from "../src/sync";
 import { FakeIndex, FakeZotero, item } from "./fakes";
 
 function setup(budget?: number) {
@@ -22,7 +22,7 @@ function library(z: FakeZotero) {
 }
 
 describe("sync", () => {
-	it("indexes top-level items with their full text and notes, and records where it got to", async () => {
+	it("indexes top-level items with their full text, and records where it got to", async () => {
 		const t = setup();
 		library(t.zotero);
 		const result = await t.run();
@@ -33,7 +33,10 @@ describe("sync", () => {
 		expect(doc?.text).toContain("# Title AAAAAAAA");
 		expect(doc?.text).toContain("Authors: Ada Lovelace");
 		expect(doc?.text).toContain("About reefs.");
-		expect(doc?.text).toContain("Key idea: bleaching");
+		// Tags and notes are deliberately not part of the indexed text.
+		expect(doc?.text).not.toContain("bleaching");
+		expect(doc?.text).not.toContain("Tags:");
+		expect(doc?.text).not.toContain("My notes");
 		expect(doc?.text).toContain("Corals bleach when water warms.");
 		expect(doc?.metadata).toMatchObject({ year: "2021", itemtype: "journalArticle", doi: "10.1/abc", creators: "Lovelace" });
 		expect(t.state().queue).toEqual([]);
@@ -66,19 +69,88 @@ describe("sync", () => {
 		expect(t.index.docs.get("AAAAAAAA")?.text).toContain("Corals bleach");
 	});
 
-	it("reindexes the parent when a note changes", async () => {
+	it("does not upload again when only a note or a tag changes", async () => {
 		const t = setup();
 		library(t.zotero);
 		await t.run();
+		const uploadsBefore = t.index.upserts;
 
 		t.zotero.version = 12;
 		const note = t.zotero.items.find((i) => i.key === "NOTENOTE");
-		if (note) {
+		const parent = t.zotero.items.find((i) => i.key === "AAAAAAAA");
+		if (note && parent) {
 			note.version = 12;
 			note.data.note = "<p>Changed my mind</p>";
+			parent.version = 12;
+			parent.data.tags = [{ tag: "new-tag" }];
+		}
+		const result = await t.run();
+
+		expect(t.index.upserts).toBe(uploadsBefore);
+		expect(result.indexed).toBe(0);
+		expect(result.unchanged).toBe(1);
+		expect(t.state().lastRun).toMatchObject({ indexed: 0, unchanged: 1 });
+		expect(t.index.docs.get("AAAAAAAA")?.text).not.toContain("Changed my mind");
+	});
+
+	it("does upload again when the paper's text changes: a new PDF, or a corrected abstract", async () => {
+		const t = setup();
+		library(t.zotero);
+		await t.run();
+		const before = t.index.upserts;
+
+		t.zotero.version = 12;
+		const parent = t.zotero.items.find((i) => i.key === "AAAAAAAA");
+		if (parent) {
+			parent.version = 12;
+			parent.data.abstractNote = "A corrected abstract.";
 		}
 		await t.run();
-		expect(t.index.docs.get("AAAAAAAA")?.text).toContain("Changed my mind");
+		expect(t.index.upserts).toBe(before + 1);
+		expect(t.index.docs.get("AAAAAAAA")?.text).toContain("A corrected abstract.");
+
+		t.zotero.version = 13;
+		t.zotero.fullText.PDFPDFPD = { content: "Different extracted text.", version: 13 };
+		await t.run();
+		expect(t.index.upserts).toBe(before + 2);
+		expect(t.index.docs.get("AAAAAAAA")?.text).toContain("Different extracted text.");
+	});
+
+	it("adopts the previous layout without uploading anything, then uploads real changes", async () => {
+		const t = setup();
+		library(t.zotero);
+		// A library already indexed under the previous layout, whose documents also held tags and notes.
+		for (const key of ["AAAAAAAA", "BBBBBBBB"]) {
+			await t.index.upsert(key, "old document with tags and notes", { title: "", year: "", itemtype: "", doi: "", creators: "" });
+		}
+		const before = t.index.upserts;
+		const migrating = () =>
+			runSync({ zotero: t.zotero, index: t.index, load: async () => state, save: async (s) => void (state = structuredClone(s)) });
+		let state: SyncState | null = { format: 4, version: 10, ftVersion: 6, queue: [] };
+
+		const first = await migrating();
+		expect(first.indexed).toBe(0);
+		expect(t.index.upserts).toBe(before); // nothing re-ingested
+		expect(Object.keys(state?.hashes ?? {}).sort()).toEqual(["AAAAAAAA", "BBBBBBBB"]);
+		expect(state?.format).toBe(DOCUMENT_FORMAT);
+		expect(state?.adopt).toBeUndefined();
+
+		// Once adoption is over, a paper with no fingerprint is new and is uploaded.
+		t.zotero.version = 20;
+		t.zotero.items.push(item("CCCCCCCC", 20, { title: "A new paper" }));
+		const second = await migrating();
+		expect(second.indexed).toBe(1);
+		expect(t.index.docs.has("CCCCCCCC")).toBe(true);
+	});
+
+	it("still rebuilds from scratch when the layout is older than the adoptable one", async () => {
+		const t = setup();
+		library(t.zotero);
+		let state: SyncState | null = { format: 3, version: 10, ftVersion: 6, queue: [] };
+		const result = await runSync({ zotero: t.zotero, index: t.index, load: async () => state, save: async (s) => void (state = structuredClone(s)) });
+		expect(result.indexed).toBe(2);
+		expect(t.index.docs.size).toBe(2);
+		expect(EMPTY_STATE.hashes).toEqual({});
 	});
 
 	it("removes trashed and permanently deleted items", async () => {

@@ -16,13 +16,22 @@ export type SyncState = {
 	ftVersion: number;
 	discover?: { start: number; version: number };
 	queue: string[];
-	lastRun?: { at: string; indexed: number; removed: number; error?: string };
+	/**
+	 * A fingerprint of the document last uploaded for each paper. Re-checking a paper whose fingerprint has not changed (a tag or
+	 * note was edited, say) uploads nothing, so only a change to the indexed text, such as a new PDF, is ingested again.
+	 */
+	hashes?: Record<string, string>;
+	/** During a migration from a layout that kept no fingerprints: papers with none are taken to be indexed already, and just recorded. */
+	adopt?: boolean;
+	lastRun?: { at: string; indexed: number; unchanged?: number; removed: number; error?: string };
 };
 
 /** Raise this when the indexed documents change shape (what is kept, what is cut), so existing ones are rebuilt. */
-export const DOCUMENT_FORMAT = 4;
+export const DOCUMENT_FORMAT = 5;
+/** The last layout whose documents differ from the current one only by the tags and notes they held, so it can be adopted without a rebuild. */
+const ADOPTABLE_FORMAT = 4;
 
-export const EMPTY_STATE: SyncState = { format: DOCUMENT_FORMAT, version: 0, ftVersion: 0, queue: [] };
+export const EMPTY_STATE: SyncState = { format: DOCUMENT_FORMAT, version: 0, ftVersion: 0, queue: [], hashes: {} };
 
 const PAGE = 100;
 const BATCH = 25;
@@ -124,7 +133,12 @@ async function fullTextOf(zotero: ZoteroLike, attachment: ZoteroItem) {
 	}
 }
 
-async function indexOne(parent: ZoteroItem, { zotero, index }: SyncDeps) {
+const hex = (buffer: ArrayBuffer) => [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+
+/** What happened to one paper: uploaded, found unchanged since its last upload, or (during a migration) recorded without uploading. */
+type Outcome = "uploaded" | "unchanged" | "adopted";
+
+async function indexOne(parent: ZoteroItem, { zotero, index }: SyncDeps, state: SyncState): Promise<Outcome> {
 	const children = parseJson<ZoteroItem[]>(await zotero.get(`/items/${parent.key}/children`, { format: "json", limit: 100 }));
 	const texts: string[] = [];
 	for (const child of children) {
@@ -135,8 +149,20 @@ async function indexOne(parent: ZoteroItem, { zotero, index }: SyncDeps) {
 			}
 		}
 	}
-	const { text, metadata } = buildDocument(parent, children, texts);
+	const { text, metadata } = buildDocument(parent, texts);
+	const hash = hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${text}\n${JSON.stringify(metadata)}`)));
+
+	const hashes = (state.hashes ??= {});
+	const known = hashes[parent.key];
+	if (known === hash) {
+		return "unchanged";
+	}
+	hashes[parent.key] = hash;
+	if (known === undefined && state.adopt) {
+		return "adopted";
+	}
 	await index.upsert(parent.key, text, metadata);
+	return "uploaded";
 }
 
 /** One scheduled run: find what changed, then index or remove as many of the queued items as this invocation's request budget allows. */
@@ -144,10 +170,12 @@ export async function runSync(deps: SyncDeps) {
 	const { zotero, index } = deps;
 	let state = (await deps.load()) ?? structuredClone(EMPTY_STATE);
 	if (state.format !== DOCUMENT_FORMAT) {
-		// Indexed under an older layout: start again from nothing, keeping the record of the last run.
-		state = { ...structuredClone(EMPTY_STATE), lastRun: state.lastRun };
+		// Indexed under an older layout: start again from nothing, keeping the record of the last run. The layout that only
+		// differed by holding tags and notes is adopted instead: every paper is read once and fingerprinted, with nothing uploaded.
+		state = { ...structuredClone(EMPTY_STATE), lastRun: state.lastRun, ...(state.format === ADOPTABLE_FORMAT ? { adopt: true } : {}) };
 	}
 	let indexed = 0;
+	let unchanged = 0;
 	let removed = 0;
 	let error: string | undefined;
 
@@ -174,10 +202,15 @@ export async function runSync(deps: SyncDeps) {
 				const parent = found.get(key);
 				if (!parent || parent.data.deleted || CHILD_TYPES.has(parent.data.itemType)) {
 					await index.remove(key);
+					delete state.hashes?.[key];
 					removed++;
 				} else {
-					await indexOne(parent, deps);
-					indexed++;
+					const outcome = await indexOne(parent, deps, state);
+					if (outcome === "uploaded") {
+						indexed++;
+					} else {
+						unchanged++;
+					}
 				}
 				state.queue.shift();
 			}
@@ -189,12 +222,16 @@ export async function runSync(deps: SyncDeps) {
 		}
 	}
 
+	if (state.adopt && state.queue.length === 0 && !state.discover) {
+		state.adopt = undefined; // Every paper has been fingerprinted: from now on a paper with no fingerprint is new.
+	}
 	state.lastRun = {
 		at: (deps.now?.() ?? new Date()).toISOString(),
 		indexed,
+		unchanged,
 		removed,
 		...(error ? { error } : {}),
 	};
 	await deps.save(state);
-	return { state, indexed, removed, error };
+	return { state, indexed, unchanged, removed, error };
 }

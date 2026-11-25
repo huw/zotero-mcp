@@ -2,7 +2,6 @@ import type { ZoteroItem } from "./zotero";
 
 /** Full text beyond this is cut. A few very long books would otherwise eat the free ingestion allowance on their own. */
 export const MAX_FULLTEXT_CHARS = 400_000;
-const MAX_NOTES_CHARS = 20_000;
 
 const ENTITIES: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&nbsp;": " " };
 
@@ -133,11 +132,14 @@ export type IndexMetadata = { title: string; year: string; itemtype: string; doi
 /** The five custom metadata fields an AI Search instance allows, in the order the instance declares them. */
 export const METADATA_FIELDS = ["title", "year", "itemtype", "doi", "creators"] as const;
 
-export function buildDocument(parent: ZoteroItem, children: ZoteroItem[], fullTexts: string[]) {
+/**
+ * The text indexed for one paper: its title, authors, year, abstract and the full text of its attachments. Tags and notes are
+ * left out on purpose, so that editing them never changes what is indexed and so never costs a re-ingest.
+ */
+export function buildDocument(parent: ZoteroItem, fullTexts: string[]) {
 	const { data } = parent;
 	const title = data.title ?? "(untitled)";
 	const authors = (data.creators ?? []).filter((c) => !c.creatorType || c.creatorType === "author").map(creatorName).filter(Boolean);
-	const tags = (data.tags ?? []).map((t) => t.tag);
 
 	const header = [
 		`# ${title}`,
@@ -145,21 +147,12 @@ export function buildDocument(parent: ZoteroItem, children: ZoteroItem[], fullTe
 		[yearOf(parent) && `Year: ${yearOf(parent)}`, data.publicationTitle && `Published in: ${data.publicationTitle}`, data.DOI && `DOI: ${data.DOI}`, `Type: ${data.itemType}`]
 			.filter(Boolean)
 			.join(" · "),
-		tags.length > 0 ? `Tags: ${tags.join(", ")}` : "",
 		`Zotero key: ${parent.key}`,
 	].filter(Boolean);
 
 	const sections = [header.join("\n")];
 	if (data.abstractNote) {
 		sections.push(`## Abstract\n${data.abstractNote}`);
-	}
-	const notes = children
-		.filter((child) => child.data.itemType === "note" && child.data.note)
-		.map((child) => htmlToText(child.data.note ?? ""))
-		.join("\n\n")
-		.slice(0, MAX_NOTES_CHARS);
-	if (notes) {
-		sections.push(`## My notes\n${notes}`);
 	}
 	const fullText = fullTexts.map(stripReferences).join("\n\n").slice(0, MAX_FULLTEXT_CHARS);
 	if (fullText) {

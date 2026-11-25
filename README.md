@@ -68,9 +68,11 @@ Paywalled papers are out of reach by design. For those, select them in Zotero De
 
 A Cron Trigger runs every 10 minutes. Each run asks Zotero what changed since last time (one conditional request, so a quiet library costs almost nothing), then indexes the affected items into an AI Search instance with built-in storage:
 
-- one Markdown file per top-level item, named `<ITEMKEY>.md`, holding the title, authors, year, tags, abstract, your notes and the full text Zotero extracted from its attachments;
+- one Markdown file per top-level item, named `<ITEMKEY>.md`, holding the title, authors, year, abstract and the full text Zotero extracted from its attachments. **Tags and notes are deliberately not indexed**, so editing them never changes anything the index holds;
 - five metadata fields on each (`title`, `year`, `itemtype`, `doi`, `creators`), which `semantic_search` can filter on;
-- a changed or new attachment, a changed note, a trashed item or a permanently deleted one all update or remove the right document.
+- a changed or new attachment, a trashed item or a permanently deleted one all update or remove the right document.
+
+**Only a change to the indexed text is ingested again.** The sync keeps a fingerprint of the last document uploaded for each paper. When a paper is re-checked because something about it changed in Zotero (a tag, a note, a collection), the document is rebuilt and compared: if the fingerprint is the same, nothing is uploaded and nothing is charged. A new or changed PDF, or a corrected title or abstract, changes the text and is ingested. A re-check costs a few Zotero requests but no ingestion.
 
 The Worker creates the AI Search instance itself on the first run, with hybrid (vector plus keyword) retrieval.
 
@@ -78,7 +80,7 @@ Zotero's full text exists only once Zotero desktop has indexed the PDF and synce
 
 ### Cost
 
-AI Search includes 5 million ingestion tokens, 10 GB of storage and 1,000 semantic queries a month on every Workers plan. Text is cut at 400,000 characters per item (`MAX_FULLTEXT_CHARS` in `src/document.ts`). A library under 1,000 items is mostly inside the free allowance, but a first load of many long papers can use more than 5 million tokens; beyond that AI Search charges about $0.75 per million. Check the AI Search usage page after the first sync.
+AI Search includes 5 million ingestion tokens, 10 GB of storage and 1,000 semantic queries a month on every Workers plan. Ingestion is the only cost that scales with use, and it only happens when a paper's indexed text changes (see above). Text is cut at 400,000 characters per item (`MAX_FULLTEXT_CHARS` in `src/document.ts`). A library under 1,000 items is mostly inside the free allowance, but a first load of many long papers can use more than 5 million tokens; beyond that AI Search charges about $0.75 per million. Check the AI Search usage page after the first sync.
 
 ### Sync speed
 
