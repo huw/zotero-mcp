@@ -6,6 +6,7 @@ import { annotationsFor, selectTools, writeModeOf } from "./registry";
 import { aiSearchIndex, type SearchIndex } from "./search-index";
 import { EMPTY_STATE, runSync, type SyncState } from "./sync";
 import { createTools } from "./tools";
+import { createPdfTools, type PdfJobs } from "./pdf/tools";
 import { createWriteTools } from "./write-tools";
 import { redact, Zotero } from "./zotero";
 
@@ -54,7 +55,17 @@ function createServer(env: Env) {
 		},
 	});
 
-	const tools = selectTools(writeModeOf(env.WRITE_MODE), reads, createWriteTools({ zotero }));
+	const jobs: PdfJobs = {
+		async start(itemKey) {
+			const id = `pdf-${itemKey}-${Date.now().toString(36)}`;
+			await env.PDF_WORKFLOW.create({ id, params: { itemKey } });
+			return id;
+		},
+		async status(id) {
+			return (await env.PDF_WORKFLOW.get(id)).status();
+		},
+	};
+	const tools = selectTools(writeModeOf(env.WRITE_MODE), reads, [...createWriteTools({ zotero }), ...createPdfTools({ zotero, jobs })]);
 	for (const tool of tools) {
 		server.registerTool(
 			tool.name,
@@ -75,6 +86,8 @@ function createServer(env: Env) {
 	}
 	return server;
 }
+
+export { AttachPdfWorkflow } from "./pdf/workflow";
 
 export default {
 	async fetch(request, env, ctx) {

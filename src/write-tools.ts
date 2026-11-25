@@ -54,7 +54,8 @@ type MultiWrite = {
 /** Zotero answers a batch write item by item. Collect which were saved, which already matched, and which it refused. */
 function outcome(response: ZoteroResponse, extra: Record<string, unknown> = {}): CallToolResult {
 	const body = parseJson<MultiWrite>(response);
-	const saved = Object.values(body.success ?? {});
+	// Zotero reports saved objects as keys under `success` and as full objects under `successful`. Accept either.
+	const saved = body.success ? Object.values(body.success) : Object.values(body.successful ?? {}).map((saved) => saved.key);
 	const unchanged = Object.values(body.unchanged ?? {});
 	const failed = Object.values(body.failed ?? {}).map((f) => ({ key: f.key, code: f.code, message: f.message }));
 	const result = { saved, unchanged, failed, ...extra };
@@ -84,7 +85,7 @@ async function findByDoi(zotero: ZoteroWriter, doi: string) {
 	return undefined;
 }
 
-async function fetchItems(zotero: ZoteroWriter, itemKeys: string[]) {
+export async function fetchItems(zotero: ZoteroWriter, itemKeys: string[]) {
 	const response = await zotero.get("/items", { itemKey: itemKeys.join(","), format: "json", includeTrashed: 1, limit: MAX_KEYS });
 	const found = new Map(parseJson<ZoteroItem[]>(response).map((item) => [item.key, item]));
 	const missing = itemKeys.filter((k) => !found.has(k));
@@ -109,7 +110,8 @@ async function modify(zotero: ZoteroWriter, itemKeys: string[], change: (data: Z
 	if (updates.length === 0) {
 		return text({ saved: [], unchanged: itemKeys, failed: [] });
 	}
-	const response = await zotero.send("POST", "/items", updates, { "Zotero-Write-Token": writeToken() });
+	// Each update carries its item's version, which already stops a repeat or a clash, so no write token (Zotero says to omit it).
+	const response = await zotero.send("POST", "/items", updates);
 	const result = outcome(response);
 	const unchangedHere = itemKeys.filter((k) => !updates.some((u) => u.key === k));
 	if (unchangedHere.length > 0 && !result.isError) {

@@ -14,6 +14,7 @@
 		// Your numeric Zotero userID (zotero.org/settings/keys). It is not a secret.
 		"ZOTERO_USER_ID": "13681064",
 		"WRITE_MODE": "full",
+		"UNPAYWALL_EMAIL": "",
 		// The AI Search instance the sync fills and semantic_search reads. The Worker creates it on first sync.
 		"AI_SEARCH_INSTANCE": "zotero",
 		// Outside requests one sync run may make. The Workers Free plan allows 50 per invocation; raise this on a paid plan to index faster.

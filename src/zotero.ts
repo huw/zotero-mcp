@@ -24,9 +24,13 @@ export interface ZoteroLike {
 
 /** The writes the tools make. Kept apart from ZoteroLike so the read-only sync can never reach them. */
 export interface ZoteroWriter extends ZoteroLike {
-	send(method: "POST" | "PATCH" | "DELETE", path: string, body?: unknown, headers?: Record<string, string>): Promise<ZoteroResponse>;
+	send(method: "POST" | "PATCH" | "PUT" | "DELETE", path: string, body?: unknown, headers?: Record<string, string>): Promise<ZoteroResponse>;
 	/** Zotero's blank item for a type: the fields that type allows. */
 	itemTemplate(itemType: string): Promise<Record<string, unknown>>;
+	/** A form-encoded POST, which is how Zotero's file upload requests are made. */
+	sendForm(path: string, fields: Record<string, string>, headers?: Record<string, string>): Promise<ZoteroResponse>;
+	/** Where a stored attachment's file can be downloaded from: a temporary signed address, which needs no API key. */
+	fileLocation(attachmentKey: string): Promise<string>;
 }
 
 export class ZoteroError extends Error {
@@ -53,6 +57,8 @@ function explain(status: number, path: string, detail: string) {
 	switch (status) {
 		case 403:
 			return `Zotero refused the request (HTTP 403) for ${path}. Check that the ZOTERO_API_KEY secret is valid and may read this library. ${detail}`;
+		case 413:
+			return `Zotero refused the upload (HTTP 413) for ${path}: it would exceed your Zotero storage quota. ${detail}`;
 		case 409:
 			return `Zotero refused the change (HTTP 409) for ${path}: something it refers to does not exist, or the library is locked. ${detail}`;
 		case 412:
@@ -94,8 +100,34 @@ export class Zotero implements ZoteroWriter {
 		return this.request("GET", path, params, headers);
 	}
 
-	send(method: "POST" | "PATCH" | "DELETE", path: string, body?: unknown, headers: Record<string, string> = {}) {
+	send(method: "POST" | "PATCH" | "PUT" | "DELETE", path: string, body?: unknown, headers: Record<string, string> = {}) {
 		return this.request(method, path, {}, headers, body);
+	}
+
+	sendForm(path: string, fields: Record<string, string>, headers: Record<string, string> = {}) {
+		return this.request("POST", path, {}, headers, new URLSearchParams(fields));
+	}
+
+	/**
+	 * Asks for a stored file and returns the address Zotero redirects to, without following it. The redirect goes to another
+	 * host, and following it here would send the API key there too.
+	 */
+	async fileLocation(attachmentKey: string) {
+		if (!this.hasBudget()) {
+			throw new BudgetExhausted();
+		}
+		this.calls++;
+		const response = await fetch(`https://api.zotero.org/users/${env.ZOTERO_USER_ID}/items/${attachmentKey}/file`, {
+			redirect: "manual",
+			headers: { "Zotero-API-Key": env.ZOTERO_API_KEY, "Zotero-API-Version": "3" },
+		});
+		const location = response.headers.get("Location");
+		if (response.status >= 300 && response.status < 400 && location) {
+			await response.body?.cancel();
+			return location;
+		}
+		await response.body?.cancel();
+		throw new ZoteroError(`Zotero has no stored file for ${attachmentKey} (HTTP ${response.status}).`, response.status === 200 ? 404 : response.status);
 	}
 
 	async itemTemplate(itemType: string) {
@@ -139,10 +171,10 @@ export class Zotero implements ZoteroWriter {
 				headers: {
 					"Zotero-API-Key": env.ZOTERO_API_KEY,
 					"Zotero-API-Version": "3",
-					...(body === undefined ? {} : { "Content-Type": "application/json" }),
+					...(body === undefined ? {} : body instanceof URLSearchParams ? { "Content-Type": "application/x-www-form-urlencoded" } : { "Content-Type": "application/json" }),
 					...headers,
 				},
-				body: body === undefined ? undefined : JSON.stringify(body),
+				body: body === undefined ? undefined : body instanceof URLSearchParams ? body : JSON.stringify(body),
 			});
 			const asked = Number(response.headers.get("Backoff"));
 			if (asked > 0) {

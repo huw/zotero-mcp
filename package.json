@@ -14,7 +14,8 @@
 	"dependencies": {
 		"@modelcontextprotocol/server": "2.4.0",
 		"agents": "0.32.0",
-		"jose": "6.2.14"
+		"jose": "6.2.14",
+		"pdf-lib": "1.17.1"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-plugin": "1.4.11",

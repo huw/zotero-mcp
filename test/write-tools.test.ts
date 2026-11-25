@@ -42,6 +42,12 @@ function setup(library: ReturnType<typeof item>[] = [], reply: (sent: Sent) => Z
 			sent.push(call);
 			return reply(call);
 		},
+		async sendForm() {
+			throw new Error("unexpected form post");
+		},
+		async fileLocation() {
+			throw new Error("unexpected file download");
+		},
 		async itemTemplate(type) {
 			const t = TEMPLATES[type];
 			if (!t) throw new Error(`no template ${type}`);
@@ -187,6 +193,19 @@ describe("batch changes check each item's version and write only what changes", 
 
 		expect(sent[0]?.body).toEqual([{ key: "AAAAAAAA", version: 11, tags: [{ tag: "old" }, { tag: "new" }] }]);
 		expect(result.unchanged).toContain("BBBBBBBB");
+	});
+
+	it("sends versions and no write token on a batch update, as Zotero's docs say", async () => {
+		const { tool, sent } = setup([paper("AAAAAAAA", {}, 3)]);
+		await tool("add_tags").handler({ keys: ["AAAAAAAA"], tags: ["x"] });
+		expect(sent[0]?.headers["Zotero-Write-Token"]).toBeUndefined();
+		expect((sent[0]?.body as { version: number }[])[0]?.version).toBe(3);
+	});
+
+	it("understands a batch response that lists saved objects instead of keys", async () => {
+		const { tool } = setup([paper("AAAAAAAA", {}, 3)], () => ok({ successful: { "0": { key: "AAAAAAAA", version: 4 } }, unchanged: {}, failed: {} }));
+		const result = parse(await tool("add_tags").handler({ keys: ["AAAAAAAA"], tags: ["x"] }));
+		expect(result.saved).toEqual(["AAAAAAAA"]);
 	});
 
 	it("does not write at all when nothing changes", async () => {

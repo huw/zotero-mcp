@@ -20,6 +20,7 @@ A stateless `createMcpHandler` from the Agents SDK serves MCP. There is no Durab
 | `export_bibliography` | Formatted citations in any CSL style (`apa`, `chicago-author-date`, ...), or BibTeX, BibLaTeX, RIS, CSL JSON. |
 | `semantic_search` | Search by meaning over titles, abstracts, your notes and full text. Optional item type and year range. Returns passages with the Zotero key to follow up. |
 | `index_status` | How far the semantic index has got. |
+| `pdf_job_status` | How the background PDF jobs are going. |
 
 ### Tools that change your library
 
@@ -33,6 +34,7 @@ Claude's connector settings list every tool separately, and each can be set to a
 | `create_item` | Add something with no DOI (web page, report, book). Fields the item type does not have are refused. |
 | `add_note`, `add_tags`, `add_to_collection`, `create_collection` | Add a note, tags, or collection membership, to up to 50 items at a time where it makes sense. |
 | `restore_item` | Take an item out of the trash. |
+| `attach_open_access_pdf` | Find a legal open-access PDF for up to 10 papers, store it in your Zotero storage and make its text searchable. Runs in the background; see below. |
 
 **Destructive** (removes, overwrites or moves something that was there):
 
@@ -49,6 +51,18 @@ Claude's connector settings list every tool separately, and each can be set to a
 `WRITE_MODE` in `wrangler.jsonc` is a second switch that does not depend on Claude's settings: `off` registers no write tools at all, `additive` registers only the additive ones, `full` (the default) registers everything. Anything else counts as `off`.
 
 Responses come back as Zotero sends them, minus the `library` and `links` boilerplate on every object, and with the API key replaced by `[redacted]` wherever it might appear.
+
+## Fetching PDFs
+
+`attach_open_access_pdf` takes up to 10 papers by key and starts a [Cloudflare Workflow](https://developers.cloudflare.com/workflows/) for each, so it returns at once and the work survives a retry. For each paper the Workflow:
+
+1. **Finds an open-access PDF** from the paper's DOI: OpenAlex first (it needs no key), then Unpaywall if you set `UNPAYWALL_EMAIL` (it asks callers for an address; the one you set is sent to it, and nothing else is). Only copies those services list as open access are used. Claude never supplies a URL, and every address is checked before it is fetched: https only, a public host name, no IP addresses, no internal names, no odd ports, and every redirect is checked too.
+2. **Stores it in Zotero** as a child attachment (title "Full Text PDF (open access)"), using Zotero's file upload, so it counts against your Zotero storage. A paper that already has a stored PDF is skipped, and a failed upload leaves nothing behind (the empty attachment is moved to the trash).
+3. **Extracts its text** with Workers AI [`toMarkdown`](https://developers.cloudflare.com/workers-ai/features/markdown-conversion/) (plain text, no PDF metadata) and saves it as the attachment's full text. After that `get_fulltext`, keyword full-text search and the semantic index all see it, with no need to wait for Zotero Desktop.
+
+**Large PDFs.** Up to 20 MB a PDF is read into memory once. A PDF that `toMarkdown` rejects is split into 40-page ranges and converted piece by piece. From 20 MB to 100 MB it is streamed to Zotero twice (once to hash it, once to upload it) so it is never held in memory whole, and its text is left for Zotero Desktop to extract when it syncs. Over 100 MB it is skipped. A scanned PDF with no text layer is stored, and the job reports that there was no text to extract.
+
+Paywalled papers are out of reach by design. For those, select them in Zotero Desktop and use **Find Available PDF**, which can use your institution's access. It needs **Workers Paid**.
 
 ## How semantic search works
 
@@ -68,7 +82,7 @@ AI Search includes 5 million ingestion tokens, 10 GB of storage and 1,000 semant
 
 ### Sync speed
 
-A cron invocation may make 50 outside requests on the Workers Free plan, and each item costs a few (its children, plus one per attachment's text). `SYNC_REQUEST_BUDGET` (default 45) caps one run, and the queue carries over, so a first load of a few hundred items takes several hours, and after that a run is nearly always quick. On a paid plan, set `SYNC_REQUEST_BUDGET` to something like 900 in `wrangler.jsonc` to index much faster.
+A cron invocation may make 50 outside requests on the Workers Free plan (10,000 on Paid), and each item costs a few: its children, one per attachment's text, and one to the search index. `SYNC_REQUEST_BUDGET` caps one run, counting Zotero and the index together, and the queue carries over. It is set to 900 for Workers Paid, which indexes a library in a few runs. On the Free plan set it to 44, and a first load of a few hundred items takes several hours.
 
 ## Setup
 
@@ -139,7 +153,7 @@ pnpm type-check
 
 - Deleting an attachment does not mark its parent stale (Zotero does not bump the parent), so the parent's document keeps the old text until the parent next changes.
 - Only the user library is covered, not group libraries.
-- `add_paper_by_doi` does not attach a PDF. Attaching files means storing them in Zotero's file storage, which this server does not do.
+- `add_paper_by_doi` saves metadata only. Use `attach_open_access_pdf` afterwards to add the PDF.
 - AI Search allows five custom metadata fields per instance, so tags and collections are searchable as text inside each document but cannot be used as filters.
 - Full text is limited to what Zotero itself has extracted. PDFs Zotero has not indexed are not searchable.
 

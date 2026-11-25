@@ -12,7 +12,8 @@ export function writeModeOf(value: string | undefined): WriteMode {
 
 /** The tools a server in this mode offers. Tools outside the mode are not registered at all, so Claude cannot even see them. */
 export function selectTools(mode: WriteMode, reads: Tool[], writes: Tool[]) {
-	const allowed: ToolKind[] = mode === "full" ? ["write", "destructive"] : mode === "additive" ? ["write"] : [];
+	// Tools that only read are always offered, wherever they are listed.
+	const allowed: ToolKind[] = mode === "full" ? ["read", "write", "destructive"] : mode === "additive" ? ["read", "write"] : ["read"];
 	return [...reads, ...writes.filter((tool) => allowed.includes(tool.kind ?? "read"))];
 }
 

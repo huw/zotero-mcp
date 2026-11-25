@@ -15,12 +15,21 @@
 		// What Claude may change in your library. "off": nothing, reads only. "additive": add papers, notes, tags, collections, and nothing is removed or overwritten.
 		// "full": also edit, trash, and reorganise. Each destructive tool can also be blocked per tool in the Claude connector settings.
 		"WRITE_MODE": "full",
+		// Optional. Unpaywall, a second place to look for open-access PDFs, asks callers for an email address. Put one here to use it (it
+		// is sent to Unpaywall with each lookup); leave it empty and only OpenAlex, which needs none, is used.
+		"UNPAYWALL_EMAIL": "",
 		// The AI Search instance the sync fills and semantic_search reads. The Worker creates it on first sync.
 		"AI_SEARCH_INSTANCE": "zotero",
-		// Outside requests one sync run may make, to Zotero and the search index together. The Workers Free plan allows 50 per invocation; on a paid plan raise this (say to 900) to index faster.
-		"SYNC_REQUEST_BUDGET": "44"
+		// Outside requests one sync run may make, to Zotero and the search index together. Workers Paid allows 10,000 per invocation, so 900 indexes a library in a few runs. On the Free plan (50) set it to 44.
+		"SYNC_REQUEST_BUDGET": "900"
 	},
 	"ai_search_namespaces": [{ "binding": "AI_SEARCH", "namespace": "default" }],
+	// Workers AI converts PDFs to text (toMarkdown), for the open-access PDF tool.
+	"ai": { "binding": "AI" },
+	// Fetching, storing and reading a PDF can take minutes, so it runs as a Workflow whose steps are retried one by one.
+	"workflows": [{ "name": "zotero-attach-pdf", "binding": "PDF_WORKFLOW", "class_name": "AttachPdfWorkflow" }],
+	// Workers Paid: the most CPU time a step may use (5 minutes is the platform's maximum).
+	"limits": { "cpu_ms": 300000 },
 	"kv_namespaces": [{ "binding": "SYNC_STATE" }],
 	"triggers": { "crons": ["*/10 * * * *"] },
 	"observability": { "enabled": true },
