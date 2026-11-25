@@ -66,8 +66,25 @@ describe("stripReferences, with no References heading", () => {
 describe("looksLikeReferences", () => {
 	it("is true of a list of citations and false of prose, however much it cites by name", () => {
 		expect(looksLikeReferences(citations(12))).toBe(true);
-		expect(looksLikeReferences("Smith et al. (2019) found that corals bleach, consistent with Jones and Lee (2017). ".repeat(20))).toBe(false);
+		expect(looksLikeReferences("Smith et al. (2019) found that corals bleach, consistent with Jones and Lee (2017) and with earlier surveys (Brown, 2015). Warming raised mortality. ".repeat(20))).toBe(false);
 		expect(looksLikeReferences(body)).toBe(false);
 		expect(looksLikeReferences("See doi:10.1000/x for details.")).toBe(false);
+	});
+});
+
+const apa = (n: number) =>
+	Array.from({ length: n }, (_, i) => `• Author${i}, A., Other, B., & Third, C. (${2000 + (i % 20)}). A trial of things number ${i}. The Journal of Things, ${10 + i}(${(i % 4) + 1}), ${100 + i}-${110 + i}.\n`).join("");
+
+describe("reference lists without DOIs", () => {
+	it("recognises APA-style citations as references", () => {
+		expect(looksLikeReferences(apa(10))).toBe(true);
+		expect(looksLikeReferences("Smith et al. (2019) found that corals bleach, as Jones (2017) reported earlier, and the effect grew with warming over the decade (see Brown, 2015). ".repeat(10))).toBe(false);
+	});
+
+	it("removes an APA list from the middle of a text", () => {
+		const out = stripReferences(`${body}\nThe main conclusions.\n${apa(60)}\nAppendix B. Methods\n${"Searched databases. ".repeat(200)}`);
+		expect(out).toContain("The main conclusions.");
+		expect(out).toContain("Searched databases.");
+		expect(out).not.toContain("Author30, A.");
 	});
 });

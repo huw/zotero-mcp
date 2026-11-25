@@ -39,7 +39,20 @@ const REFERENCES_HEADING = /\n[ \t]*#{0,4}[ \t]*(references|reference list|bibli
  * What a citation looks like and body text does not: a DOI, or the volume(issue):pages and year;volume run of a journal
  * reference. A page of ordinary prose has none of these, and a reference list has several in every few lines.
  */
-const CITATION_MARKER = /doi:|doi\.org|\b10\.\d{4,9}\/|\b(?:19|20)\d{2};\s?\d+\s?[(:]|\b\d+\s?\(\d+\):\s?\d+/gi;
+const CITATION_MARKER = new RegExp(
+	[
+		"doi:",
+		"doi\\.org",
+		"\\b10\\.\\d{4,9}/",
+		// Vancouver: 2015;46 (2):193-205 and 46(2):193
+		"\\b(?:19|20)\\d{2};\\s?\\d+\\s?[(:]",
+		"\\b\\d+\\s?\\(\\d+\\):\\s?\\d+",
+		// APA: "Smith, J. (2015). Title", and "Journal, 46(2), 193-205"
+		"\\((?:19|20)\\d{2}\\)\\.\\s+[A-Z]",
+		"\\b\\d{1,4}\\s?\\(\\d{1,3}\\),\\s?[a-z]?\\d+",
+	].join("|"),
+	"gi",
+);
 const WINDOW = 1500;
 const DENSE = 4;
 const OMITTED = "\n[reference list omitted]\n";
