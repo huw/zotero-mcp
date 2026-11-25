@@ -53,6 +53,13 @@ describe("search_items", () => {
 		expect(result.results[0]).toEqual({ key: "AAAAAAAA", data: { title: "x" } });
 	});
 
+	it("drops empty fields and the key and version repeated inside data", async () => {
+		const full = { key: "AAAAAAAA", version: 3, library: { id: 1 }, data: { key: "AAAAAAAA", version: 3, itemType: "book", title: "T", publisher: "", place: "", tags: [], relations: {}, extra: "", parentCollection: false, DOI: "10.1/x" } };
+		const { tool } = setup(() => json([full]));
+		const result = JSON.parse(textOf(await tool("search_items").handler({})));
+		expect(result.results[0]).toEqual({ key: "AAAAAAAA", version: 3, data: { itemType: "book", title: "T", parentCollection: false, DOI: "10.1/x" } });
+	});
+
 	it("searches inside a collection and in full text when asked", async () => {
 		const { tool, calls } = setup(() => json([]));
 		await tool("search_items").handler({ q: "bleaching", qmode: "everything", collection: "COLLCOLL", tag: "coral", itemType: "-attachment" });

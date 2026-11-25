@@ -61,6 +61,29 @@ function outcome(response: ZoteroResponse, extra: Record<string, unknown> = {}):
 	return failed.length > 0 && saved.length === 0 && unchanged.length === 0 ? { isError: true, ...text(result) } : text(result);
 }
 
+const SCAN_PAGE = 100;
+const SCAN_MAX_PAGES = 40;
+
+/**
+ * Zotero's search cannot find an item by DOI: a DOI in q matches nothing, in either search mode. So look through the
+ * library's own DOI fields, a page at a time, stopping at the first match.
+ */
+async function findByDoi(zotero: ZoteroWriter, doi: string) {
+	const wanted = doi.toLowerCase();
+	for (let page = 0; page < SCAN_MAX_PAGES; page++) {
+		const response = await zotero.get("/items/top", { format: "json", limit: SCAN_PAGE, start: page * SCAN_PAGE });
+		const items = parseJson<ZoteroItem[]>(response);
+		const match = items.find((item) => item.data.DOI?.toLowerCase() === wanted);
+		if (match) {
+			return match;
+		}
+		if (items.length < SCAN_PAGE || (response.total !== undefined && (page + 1) * SCAN_PAGE >= response.total)) {
+			return undefined;
+		}
+	}
+	return undefined;
+}
+
 async function fetchItems(zotero: ZoteroWriter, itemKeys: string[]) {
 	const response = await zotero.get("/items", { itemKey: itemKeys.join(","), format: "json", includeTrashed: 1, limit: MAX_KEYS });
 	const found = new Map(parseJson<ZoteroItem[]>(response).map((item) => [item.key, item]));
@@ -145,9 +168,7 @@ export function createWriteTools({ zotero, resolveDoi: resolve = resolveDoi }: W
 				} catch (error) {
 					return failure((error as Error).message);
 				}
-				const existing = parseJson<ZoteroItem[]>(
-					await zotero.get("/items", { q: doi, qmode: "everything", itemType: "-attachment || note", format: "json", limit: 10 }),
-				).find((item) => item.data.DOI?.toLowerCase() === doi.toLowerCase());
+				const existing = await findByDoi(zotero, doi);
 				if (existing) {
 					return text({ added: false, reason: "Already in the library.", key: existing.key, title: existing.data.title });
 				}

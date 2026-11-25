@@ -30,13 +30,23 @@ export const text = (value: unknown): CallToolResult => ({
 	content: [{ type: "text", text: redact(typeof value === "string" ? value : JSON.stringify(value)) }],
 });
 
-/** Zotero repeats the library and a set of links on every object. The model never needs them. */
+const isEmpty = (value: unknown) =>
+	value === "" || (Array.isArray(value) && value.length === 0) || (value !== null && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
+
+/**
+ * Zotero repeats the library and a set of links on every object, repeats the key and version inside `data`, and sends every
+ * field the item type has, empty or not. The model needs none of that, and it adds up over a page of results.
+ */
 export function slim<T>(value: T): T {
 	if (Array.isArray(value)) {
 		return value.map(slim) as T;
 	}
 	if (value && typeof value === "object") {
 		const { library: _library, links: _links, ...rest } = value as Record<string, unknown>;
+		if (rest.data && typeof rest.data === "object") {
+			const { key: _key, version: _version, ...data } = rest.data as Record<string, unknown>;
+			rest.data = Object.fromEntries(Object.entries(data).filter(([, field]) => !isEmpty(field)));
+		}
 		return rest as T;
 	}
 	return value;

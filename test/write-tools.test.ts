@@ -21,6 +21,11 @@ function setup(library: ReturnType<typeof item>[] = [], reply: (sent: Sent) => Z
 		hasBudget: () => true,
 		async get(path, params = {}) {
 			gets.push({ path, params });
+			if (path === "/items/top") {
+				const start = Number(params.start ?? 0);
+				const all = library.filter((i) => !i.data.parentItem);
+				return ok(all.slice(start, start + Number(params.limit ?? 25)), { total: all.length });
+			}
 			if (path === "/items") {
 				const keys = typeof params.itemKey === "string" ? params.itemKey.split(",") : undefined;
 				const hits = library.filter((i) => (keys ? keys.includes(i.key) : true) && (params.q ? i.data.DOI?.toLowerCase() === String(params.q).toLowerCase() : true));
@@ -116,6 +121,22 @@ describe("add_paper_by_doi", () => {
 		const result = parse(await tool("add_paper_by_doi").handler({ doi: "10.1000/xyz" }));
 		expect(result).toMatchObject({ added: false, key: "AAAAAAAA" });
 		expect(sent).toHaveLength(0);
+	});
+
+	it("finds a duplicate beyond the first page of the library", async () => {
+		const library = Array.from({ length: 250 }, (_, i) => paper(`P${String(i).padStart(7, "0")}`, i === 230 ? { DOI: "10.1000/XYZ" } : { DOI: `10.9/${i}` }));
+		const { tool, sent, gets } = setup(library, undefined, csl);
+		const result = parse(await tool("add_paper_by_doi").handler({ doi: "10.1000/xyz" }));
+		expect(result).toMatchObject({ added: false, key: "P0000230" });
+		expect(gets.filter((g) => g.path === "/items/top")).toHaveLength(3);
+		expect(sent).toHaveLength(0);
+	});
+
+	it("stops scanning at the end of the library and adds the paper when no DOI matches", async () => {
+		const { tool, sent, gets } = setup([paper("AAAAAAAA", { DOI: "10.9/other" })], undefined, csl);
+		expect(parse(await tool("add_paper_by_doi").handler({ doi: "10.1000/xyz" }))).toMatchObject({ added: true });
+		expect(gets.filter((g) => g.path === "/items/top")).toHaveLength(1);
+		expect(sent).toHaveLength(1);
 	});
 
 	it("rejects something that is not a DOI before it reaches the network", async () => {

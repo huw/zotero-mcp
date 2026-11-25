@@ -69,14 +69,24 @@ export default {
 		return createMcpHandler(() => createServer(env))(request, env, ctx);
 	},
 
-	async scheduled(_controller, env, ctx) {
+	async scheduled(controller, env, ctx) {
 		ctx.waitUntil(
-			runSync({
-				zotero: new Zotero(Number(env.SYNC_REQUEST_BUDGET) || DEFAULT_SYNC_BUDGET),
-				index: aiSearchIndex(),
-				load: () => env.SYNC_STATE.get<SyncState>(STATE_KEY, "json"),
-				save: (state) => env.SYNC_STATE.put(STATE_KEY, JSON.stringify(state)),
-			}),
+			(async () => {
+				console.log("Zotero sync starting", { cron: controller.cron });
+				try {
+					const zotero = new Zotero(Number(env.SYNC_REQUEST_BUDGET) || DEFAULT_SYNC_BUDGET);
+					const result = await runSync({
+						zotero,
+						index: aiSearchIndex(),
+						load: () => env.SYNC_STATE.get<SyncState>(STATE_KEY, "json"),
+						save: (state) => env.SYNC_STATE.put(STATE_KEY, JSON.stringify(state)),
+					});
+					console.log("Zotero sync finished", { indexed: result.indexed, removed: result.removed, waiting: result.state.queue.length, requests: zotero.calls, error: result.error });
+				} catch (error) {
+					// Reached only if reading or saving the sync state fails, which runSync cannot record itself.
+					console.error("Zotero sync could not run", { error: error instanceof Error ? error.message : String(error) });
+				}
+			})(),
 		);
 	},
 } satisfies ExportedHandler<Env>;
