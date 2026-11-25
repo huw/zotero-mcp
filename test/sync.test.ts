@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type SyncState, runSync } from "../src/sync";
+import { DOCUMENT_FORMAT, type SyncState, runSync } from "../src/sync";
 import { FakeIndex, FakeZotero, item } from "./fakes";
 
 function setup(budget?: number) {
@@ -100,6 +100,24 @@ describe("sync", () => {
 		t.zotero.deleted = ["AAAAAAAA"];
 		await t.run();
 		expect(t.index.docs.size).toBe(0);
+	});
+
+	it("indexes everything again when the document format has changed", async () => {
+		const t = setup();
+		library(t.zotero);
+		await t.run();
+		const saved = t.state();
+		expect(saved.format).toBe(DOCUMENT_FORMAT);
+
+		// A state written by an older layout, with the library already "up to date" and nothing queued.
+		const old = setup();
+		library(old.zotero);
+		await old.index.upsert("AAAAAAAA", "stale", { title: "", year: "", itemtype: "", doi: "", creators: "" });
+		const run = runSync({ zotero: old.zotero, index: old.index, load: async () => ({ version: 10, ftVersion: 6, queue: [] }), save: async () => {} });
+		const result = await run;
+		expect(result.indexed).toBe(2);
+		expect(old.index.docs.get("AAAAAAAA")?.text).toContain("Corals bleach");
+		expect(result.state.format).toBe(DOCUMENT_FORMAT);
 	});
 
 	it("stops at its request budget and carries on next run", async () => {

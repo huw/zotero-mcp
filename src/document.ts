@@ -33,6 +33,23 @@ function creatorSummary(item: ZoteroItem) {
 	return item.meta?.creatorSummary ?? "";
 }
 
+const REFERENCES_HEADING = /\n[ \t]*#{0,4}[ \t]*(references|reference list|bibliography|literature cited|works cited)[ \t]*:?[ \t]*\n/gi;
+
+/**
+ * Cuts the reference list off a paper's text. A page of citations matches almost any query about the paper's topic, so left in
+ * it crowds real passages out of search results, and it is a large share of what is indexed and paid for. Only a heading in
+ * the last part of the text counts, and only if a real body remains before it.
+ */
+export function stripReferences(text: string) {
+	let cut = -1;
+	for (const match of text.matchAll(REFERENCES_HEADING)) {
+		if (match.index !== undefined && match.index > text.length * 0.5) {
+			cut = match.index;
+		}
+	}
+	return cut > 2000 ? text.slice(0, cut).trimEnd() : text;
+}
+
 export type IndexMetadata = { title: string; year: string; itemtype: string; doi: string; creators: string };
 
 /** The five custom metadata fields an AI Search instance allows, in the order the instance declares them. */
@@ -66,7 +83,7 @@ export function buildDocument(parent: ZoteroItem, children: ZoteroItem[], fullTe
 	if (notes) {
 		sections.push(`## My notes\n${notes}`);
 	}
-	const fullText = fullTexts.join("\n\n").slice(0, MAX_FULLTEXT_CHARS);
+	const fullText = fullTexts.map(stripReferences).join("\n\n").slice(0, MAX_FULLTEXT_CHARS);
 	if (fullText) {
 		sections.push(`## Full text\n${fullText}`);
 	}

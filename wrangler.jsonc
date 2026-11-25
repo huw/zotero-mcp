@@ -17,8 +17,8 @@
 		"WRITE_MODE": "full",
 		// The AI Search instance the sync fills and semantic_search reads. The Worker creates it on first sync.
 		"AI_SEARCH_INSTANCE": "zotero",
-		// Outside requests one sync run may make. The Workers Free plan allows 50 per invocation; raise this on a paid plan to index faster.
-		"SYNC_REQUEST_BUDGET": "45"
+		// Outside requests one sync run may make, to Zotero and the search index together. The Workers Free plan allows 50 per invocation; on a paid plan raise this (say to 900) to index faster.
+		"SYNC_REQUEST_BUDGET": "44"
 	},
 	"ai_search_namespaces": [{ "binding": "AI_SEARCH", "namespace": "default" }],
 	"kv_namespaces": [{ "binding": "SYNC_STATE" }],

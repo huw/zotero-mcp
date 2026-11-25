@@ -10,6 +10,8 @@ import { BudgetExhausted, parseJson, ZoteroError, type ZoteroItem, type ZoteroLi
  * exists in Zotero, or is in the trash, is removed from the index.
  */
 export type SyncState = {
+	/** Which layout of indexed document this state was built for. A different one means everything is indexed again. */
+	format?: number;
 	version: number;
 	ftVersion: number;
 	discover?: { start: number; version: number };
@@ -17,7 +19,10 @@ export type SyncState = {
 	lastRun?: { at: string; indexed: number; removed: number; error?: string };
 };
 
-export const EMPTY_STATE: SyncState = { version: 0, ftVersion: 0, queue: [] };
+/** Raise this when the indexed documents change shape (what is kept, what is cut), so existing ones are rebuilt. */
+export const DOCUMENT_FORMAT = 2;
+
+export const EMPTY_STATE: SyncState = { format: DOCUMENT_FORMAT, version: 0, ftVersion: 0, queue: [] };
 
 const PAGE = 100;
 const BATCH = 25;
@@ -137,7 +142,11 @@ async function indexOne(parent: ZoteroItem, { zotero, index }: SyncDeps) {
 /** One scheduled run: find what changed, then index or remove as many of the queued items as this invocation's request budget allows. */
 export async function runSync(deps: SyncDeps) {
 	const { zotero, index } = deps;
-	const state = (await deps.load()) ?? structuredClone(EMPTY_STATE);
+	let state = (await deps.load()) ?? structuredClone(EMPTY_STATE);
+	if (state.format !== DOCUMENT_FORMAT) {
+		// Indexed under an older layout: start again from nothing, keeping the record of the last run.
+		state = { ...structuredClone(EMPTY_STATE), lastRun: state.lastRun };
+	}
 	let indexed = 0;
 	let removed = 0;
 	let error: string | undefined;

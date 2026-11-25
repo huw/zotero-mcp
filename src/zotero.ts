@@ -82,6 +82,14 @@ export class Zotero implements ZoteroWriter {
 		return this.calls + count <= this.budget;
 	}
 
+	/** Charges requests made to something other than Zotero (the search index) against the same budget, since the platform limit counts them all. */
+	spend(count: number) {
+		if (!this.hasBudget(count)) {
+			throw new BudgetExhausted();
+		}
+		this.calls += count;
+	}
+
 	get(path: string, params: Params = {}, headers: Record<string, string> = {}) {
 		return this.request("GET", path, params, headers);
 	}

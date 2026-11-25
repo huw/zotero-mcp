@@ -3,7 +3,7 @@ import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/server/valida
 import { createMcpHandler } from "agents/mcp/server";
 import { isFromAccess } from "./access";
 import { annotationsFor, selectTools, writeModeOf } from "./registry";
-import { aiSearchIndex } from "./search-index";
+import { aiSearchIndex, type SearchIndex } from "./search-index";
 import { EMPTY_STATE, runSync, type SyncState } from "./sync";
 import { createTools } from "./tools";
 import { createWriteTools } from "./write-tools";
@@ -12,8 +12,26 @@ import { redact, Zotero } from "./zotero";
 const validator = new CfWorkerJsonSchemaValidator();
 const STATE_KEY = "state";
 
-/** A cron invocation may make 50 outside requests on the Workers Free plan. Set SYNC_REQUEST_BUDGET higher on a paid plan. */
-const DEFAULT_SYNC_BUDGET = 45;
+/** A cron invocation may make 50 outside requests on the Workers Free plan, Zotero's and the search index's together. Set SYNC_REQUEST_BUDGET higher on a paid plan. */
+const DEFAULT_SYNC_BUDGET = 44;
+
+/** Charges each call to the search index against the sync's request budget, so the total stays under the platform's limit. */
+function counted(index: SearchIndex, zotero: Zotero): SearchIndex {
+	return {
+		async ensure() {
+			zotero.spend(2);
+			await index.ensure();
+		},
+		async upsert(key, text, metadata) {
+			zotero.spend(1);
+			await index.upsert(key, text, metadata);
+		},
+		async remove(key) {
+			zotero.spend(2);
+			await index.remove(key);
+		},
+	};
+}
 
 function createServer(env: Env) {
 	const server = new McpServer({ name: "zotero-mcp", version: "0.1.0" });
@@ -77,7 +95,7 @@ export default {
 					const zotero = new Zotero(Number(env.SYNC_REQUEST_BUDGET) || DEFAULT_SYNC_BUDGET);
 					const result = await runSync({
 						zotero,
-						index: aiSearchIndex(),
+						index: counted(aiSearchIndex(), zotero),
 						load: () => env.SYNC_STATE.get<SyncState>(STATE_KEY, "json"),
 						save: (state) => env.SYNC_STATE.put(STATE_KEY, JSON.stringify(state)),
 					});
