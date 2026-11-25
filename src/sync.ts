@@ -20,7 +20,7 @@ export type SyncState = {
 };
 
 /** Raise this when the indexed documents change shape (what is kept, what is cut), so existing ones are rebuilt. */
-export const DOCUMENT_FORMAT = 2;
+export const DOCUMENT_FORMAT = 3;
 
 export const EMPTY_STATE: SyncState = { format: DOCUMENT_FORMAT, version: 0, ftVersion: 0, queue: [] };
 

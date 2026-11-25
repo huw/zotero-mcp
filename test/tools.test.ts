@@ -171,8 +171,17 @@ describe("semantic_search", () => {
 		});
 		const result = JSON.parse(textOf(await tool("semantic_search").handler({ query: "heat stress", itemType: "journalArticle", yearFrom: 2015, yearTo: 2022 })));
 
-		expect(seen).toEqual(["heat stress", 8, { itemtype: "journalArticle", year: { $gte: "2015", $lte: "2022" } }]);
+		expect(seen).toEqual(["heat stress", 32, { itemtype: "journalArticle", year: { $gte: "2015", $lte: "2022" } }]);
 		expect(result).toEqual([{ itemKey: "AAAAAAAA", score: 0.812, passage: "Corals bleach.", title: "Reefs", year: "2021" }]);
+	});
+
+	it("drops passages that are only a list of citations, and still returns as many as asked for", async () => {
+		const refs = "1. Smith J. Reefs. J Mar Biol. 2015;12(3):45-60. doi:10.1000/a1\n2. Jones K. Heat. Nature. 2016;5:100-110. doi:10.1000/b2\n3. Lee P. Corals. Science. 2017;8(2):9-19. doi:10.1000/c3\n";
+		const chunk = (id: string, text: string) => ({ id, type: "text", score: 0.9, text, item: { key: `${id}.md`, metadata: { title: id } } });
+		const response = { search_query: "q", chunks: [chunk("REFSREFS", refs), chunk("GOODGOOD", "Corals bleach when water warms."), chunk("MOREMORE", "Heat stress lowers survival.")] } as AiSearchSearchResponse;
+		const { tool } = setup(() => json([]), async () => response);
+		const result = JSON.parse(textOf(await tool("semantic_search").handler({ query: "heat", limit: 2 })));
+		expect(result.map((r: { itemKey: string }) => r.itemKey)).toEqual(["GOODGOOD", "MOREMORE"]);
 	});
 
 	it("sends no filter when none is asked for", async () => {

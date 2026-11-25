@@ -36,9 +36,72 @@ function creatorSummary(item: ZoteroItem) {
 const REFERENCES_HEADING = /\n[ \t]*#{0,4}[ \t]*(references|reference list|bibliography|literature cited|works cited)[ \t]*:?[ \t]*\n/gi;
 
 /**
- * Cuts the reference list off a paper's text. A page of citations matches almost any query about the paper's topic, so left in
- * it crowds real passages out of search results, and it is a large share of what is indexed and paid for. Only a heading in
- * the last part of the text counts, and only if a real body remains before it.
+ * What a citation looks like and body text does not: a DOI, or the volume(issue):pages and year;volume run of a journal
+ * reference. A page of ordinary prose has none of these, and a reference list has several in every few lines.
+ */
+const CITATION_MARKER = /doi:|doi\.org|\b10\.\d{4,9}\/|\b(?:19|20)\d{2};\s?\d+\s?[(:]|\b\d+\s?\(\d+\):\s?\d+/gi;
+const WINDOW = 1500;
+const DENSE = 4;
+const OMITTED = "\n[reference list omitted]\n";
+
+const countMarkers = (text: string) => (text.match(CITATION_MARKER) ?? []).length;
+
+/** True for a passage that is mostly citations, which matches almost any query about its topic without saying anything. */
+export function looksLikeReferences(text: string) {
+	const markers = countMarkers(text);
+	return markers >= 3 && markers / Math.max(1, text.length / WINDOW) >= DENSE;
+}
+
+/** Windows of about 1,500 characters, each ending at a line break so that no citation is cut in half. */
+function windows(text: string) {
+	const out: { start: number; end: number }[] = [];
+	for (let start = 0; start < text.length; ) {
+		let end = Math.min(start + WINDOW, text.length);
+		const lineEnd = text.indexOf("\n", end);
+		end = lineEnd !== -1 && lineEnd - end < 300 ? lineEnd + 1 : end;
+		out.push({ start, end });
+		start = end;
+	}
+	return out;
+}
+
+/**
+ * Removes runs of two or more consecutive citation-dense windows, wherever they are (a paper's appendices often list references
+ * of included studies). A cut starts at the line of the run's first citation and ends at the line of its last, so ordinary text
+ * that shares a window with the edge of a list is kept.
+ */
+function stripCitationRuns(text: string) {
+	const spans = windows(text).map(({ start, end }) => {
+		const found = [...text.slice(start, end).matchAll(CITATION_MARKER)].map((match) => start + (match.index ?? 0));
+		return { start, end, first: found[0], last: found.at(-1), dense: found.length >= DENSE };
+	});
+
+	let out = "";
+	let at = 0;
+	for (let i = 0; i < spans.length; i++) {
+		const span = spans[i] as (typeof spans)[number];
+		if (!span.dense || (!spans[i - 1]?.dense && !spans[i + 1]?.dense) || spans[i - 1]?.dense) {
+			continue;
+		}
+		let last = i;
+		while (spans[last + 1]?.dense) {
+			last++;
+		}
+		const from = text.lastIndexOf("\n", span.first as number) + 1;
+		const lineEnd = text.indexOf("\n", (spans[last] as (typeof spans)[number]).last as number);
+		const to = lineEnd === -1 ? text.length : lineEnd + 1;
+		out += text.slice(at, from) + OMITTED;
+		at = to;
+		i = last;
+	}
+	return out + text.slice(at);
+}
+
+/**
+ * Removes a paper's reference lists before indexing. A page of citations matches almost any query on the paper's topic, so
+ * left in it crowds real passages out of search results, and it is a large share of what is indexed and paid for. Two passes:
+ * everything after a "References" heading in the back half, then any run of citation-dense text elsewhere. If that would
+ * leave almost nothing, the text is kept as it was.
  */
 export function stripReferences(text: string) {
 	let cut = -1;
@@ -47,7 +110,9 @@ export function stripReferences(text: string) {
 			cut = match.index;
 		}
 	}
-	return cut > 2000 ? text.slice(0, cut).trimEnd() : text;
+	const beforeHeading = cut > 2000 ? text.slice(0, cut).trimEnd() : text;
+	const stripped = stripCitationRuns(beforeHeading);
+	return stripped.replaceAll(OMITTED, "").trim().length >= 2000 ? stripped : beforeHeading;
 }
 
 export type IndexMetadata = { title: string; year: string; itemtype: string; doi: string; creators: string };

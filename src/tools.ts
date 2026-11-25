@@ -1,5 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { htmlToText } from "./document";
+import { htmlToText, looksLikeReferences } from "./document";
 import { keyOf } from "./search-index";
 import { parseJson, redact, type ZoteroItem, type ZoteroLike, ZoteroError } from "./zotero";
 
@@ -255,14 +255,19 @@ export function createTools({ zotero, search, status }: Deps): Tool[] {
 						...(input.yearTo !== undefined ? { $lte: String(input.yearTo) } : {}),
 					};
 				}
-				const result = await search(input.query, input.limit ?? 8, filters);
+				const wanted = input.limit ?? 8;
+				// Ask for more than needed: reference lists match a topic's keywords better than the paper's own text does, and are dropped below.
+				const result = await search(input.query, Math.min(50, wanted * 4), filters);
 				return text(
-					result.chunks.map((chunk) => ({
-						itemKey: keyOf(chunk.item.key),
-						score: Number(chunk.score.toFixed(3)),
-						passage: chunk.text,
-						...chunk.item.metadata,
-					})),
+					result.chunks
+						.filter((chunk) => !looksLikeReferences(chunk.text))
+						.slice(0, wanted)
+						.map((chunk) => ({
+							itemKey: keyOf(chunk.item.key),
+							score: Number(chunk.score.toFixed(3)),
+							passage: chunk.text,
+							...chunk.item.metadata,
+						})),
 				);
 			},
 		},
