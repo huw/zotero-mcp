@@ -35,7 +35,9 @@ export function aiSearchIndex(): SearchIndex {
 		},
 		async upsert(key, text, metadata) {
 			// Uploading under an existing name overwrites and re-indexes it.
-			await instance().items.upload(fileName(key), text, { metadata });
+			// A field with nothing in it (an item with no date, say) is left out rather than sent empty.
+			const present = Object.fromEntries(Object.entries(metadata).filter(([, value]) => value !== ""));
+			await instance().items.upload(fileName(key), text, { metadata: present });
 		},
 		async remove(key) {
 			const { result } = await instance().items.list({ key: fileName(key), source: "builtin" });

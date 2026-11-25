@@ -118,7 +118,10 @@ export class Zotero implements ZoteroLike {
 				continue;
 			}
 
-			console.error("Zotero request failed", { "http.status": response.status, "http.path": url.pathname });
+			// A 404 is routine: an attachment Zotero has no extracted text for answers 404 on /fulltext.
+			if (response.status !== 404) {
+				console.error("Zotero request failed", { "http.status": response.status, "http.path": url.pathname });
+			}
 			const detail = redact(await response.text()).slice(0, 500);
 			throw new ZoteroError(explain(response.status, url.pathname, detail), response.status);
 		}

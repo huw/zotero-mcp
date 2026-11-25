@@ -136,6 +136,12 @@ describe("export_bibliography", () => {
 		expect(textOf(result)).toBe("Lovelace, A. (2021). Reefs & heat.\n\nBabbage, C. (1830).");
 	});
 
+	it("decodes the hex entities Zotero uses for dashes and accents", async () => {
+		const html = '<div class="csl-bib-body"><div class="csl-entry">Hong, J. (2018). Health Outcomes, 16, 363&#x2013;372. Caf&#xE9;.</div></div>';
+		const { tool } = setup(() => ({ status: 200, version: 1, total: undefined, body: html }));
+		expect(textOf(await tool("export_bibliography").handler({ keys: ["AAAAAAAA"] }))).toBe("Hong, J. (2018). Health Outcomes, 16, 363\u2013372. Caf\u00e9.");
+	});
+
 	it("passes raw formats through without a style", async () => {
 		const { tool, calls } = setup(() => ({ status: 200, version: 1, total: undefined, body: "@article{a}" }));
 		const result = await tool("export_bibliography").handler({ keys: ["AAAAAAAA"], format: "bibtex" });
